@@ -7,19 +7,17 @@
 # into a single SIMD vector (i.e. 4 in the case of AVX512). Widths of 2 and 4
 # are supported.
 
-#include Make.inc.intel
-include make.inc
+include build/make.inc
 
-#VTUNE_AMPLIFIER_XE_2016_DIR=/opt/intel/vtune/2016u3.external.vtknl/vtune_amplifier_xe
-
-CFLAGS = -g -I $(VTUNE_AMPLIFIER_XE_2016_DIR)/include
+CFLAGS = -O3 -g -I.
  
 OBJ = kernels.o
 
 ###
 ifeq ($(VTUNE),1)
 FFLAGS += -DUSE_VTUNE
-LDFLAGS += -L$(VTUNE_AMPLIFIER_XE_2016_DIR)/lib64/libittnotify.a
+LDFLAGS += $(VTUNE_AMPLIFIER_XE_2016_DIR)/lib64/libittnotify.a
+CFLAGS += -I $(VTUNE_AMPLIFIER_XE_2016_DIR)/include
 endif
 
 ifeq ($(SDE),1)
@@ -28,7 +26,7 @@ CFLAGS += -DUSE_SDE
 endif
 
 
-KERNELS = 1 2
+KERNELS = 1
 
 BIN_LIST = $(foreach n, $(KERNELS), $(BIN).$n)
 VTUNE_BIN_LIST = $(foreach n, $(KERNELS), $(BIN).vtune.$n)
@@ -40,26 +38,26 @@ vtune : $(VTUNE_BIN_LIST)
 
 $(OBJ) : Makefile
 
-kernels.1.o : kernels.F90
-	$(FC) $(FFLAGS) -D__KERNEL_1 -c $< -o $@ ${LDFLAGS}
+kernels.1.o : kernels.F90 module_itt_sde.o api_itt_sde.o
+	$(FC) $(FFLAGS) -D__KERNEL_1 -c $< -o $@ ${CFLAGS}
 
-kernels.2.o : kernels.F90
-	$(FC) $(FFLAGS) -D__KERNEL_2 -c $< -o $@  ${LDFLAGS}
+kernels.2.o : kernels.F90 module_itt_sde.o api_itt_sde.o
+	$(FC) $(FFLAGS) -D__KERNEL_2 -c $< -o $@ ${CFLAGS}
                                               
 api_itt_sde.o : api_itt_sde.c 
 	$(CC) $(CFLAGS) -c $< -o $@
 
 module_itt_sde.o : api_itt_sde.o
-	$(FC) $(FFLAGS) -c module_itt_sde.f90 -o $@
+	$(FC) $(FFLAGS) -c module_itt_sde.f90 -o $@ ${LDFLAGS}
 
-$(BIN).vtune.% : module_itt_sde.o kernels.%.o
-	$(FC) $(FFLAGS) -o $@ $? api_itt_sde.o $(VTUNE_AMPLIFIER_XE_2016_DIR)/lib64/libittnotify.a
+$(BIN).vtune.% : module_itt_sde.o api_itt_sde.o kernels.%.o
+	$(FC) $(FFLAGS) -o $@ $< api_itt_sde.o ${LDFLAGS}
 
 $(BIN).ipm.% : kernels.%.o
 	$(FC) $(FFLAGS) -o $@ $< $(IPM)
 
 $(BIN).% : kernels.%.o
-	$(FC) $(FFLAGS) -o $@ $< 
+	$(FC) $(FFLAGS) -o $@ $< ${LDFLAGS}
 
 
 
