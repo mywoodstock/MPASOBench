@@ -1,0 +1,14 @@
+# compilers
+FC = ftn
+
+# flags
+FFLAGS = -dynamic -g -O3 -qopenmp -xHOST
+LDFLAGS =
+LDLIBS = -qopenmp
+
+# additional flags for arch; default SIMDWIDTH; binary name
+
+SIMDWIDTH = 2
+FFLAGS += -DSIMDWIDTH=$(SIMDWIDTH)
+
+BIN = kernels
