@@ -105,9 +105,6 @@ print *, "starting to read initial conditions"
   allocate(edgeMask(nEdges))
   allocate(normalBarotropicVelocitySubcycleNew(nEdges))
 
-  ! run once before timing and before initialization to get OMP initialized and for first touch policy
-!  call run_kernel()
-
 
   read(10, '(i10)' ) cellsOnEdge
   read(10, '(i10)' ) edgesOnEdge
@@ -125,6 +122,11 @@ print *, "starting to read initial conditions"
   enddo
 
 
+  ! run once before timing and before initialization to get OMP initialized and for first touch policy
+  !$omp parallel
+  call run_kernel()
+  !$omp end parallel
+
   ! ... run timing tests ...
 
 
@@ -139,7 +141,9 @@ print *, "starting to read initial conditions"
 
     do it2 = 1, ninner
     
+    !$omp parallel
       call run_kernel()
+    !$omp end parallel
     
     end do ! it2
     wt(it1) = MPI_Wtime() - wtb
@@ -232,13 +236,11 @@ subroutine edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdg
 
     ! Compute the barotropic Coriolis term, -f*uPerp
     CoriolisTerm = 0.0
-    !dir$ VECTOR ALIGNED
+!    !dir$ VECTOR ALIGNED
     do i = 1, nEdgesOnEdge(iEdge)
        eoe = edgesOnEdge(i,iEdge)
        CoriolisTerm = CoriolisTerm + weightsOnEdge(i,iEdge)&
                       *normalBarotropicVelocitySubcycleCur(eoe) * fEdge(eoe)
-!print  iEdge, i, CoriolisTerm + weightsOnEdge(i,iEdge), &
-!                      normalBarotropicVelocitySubcycleCur(eoe), fEdge(eoe)
     end do
 
     normalBarotropicVelocitySubcycleNew(iEdge) &
@@ -247,7 +249,6 @@ subroutine edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdg
       * (sshSubcycleCur(cell2) - sshSubcycleCur(cell1) ) &
       / dcEdge(iEdge) + barotropicForcing(iEdge))) * edgeMask(iEdge)
 
-! print*, iEdge, normalBarotropicVelocitySubcycleNew(iEdge), normalBarotropicVelocitySubcycleCur(iEdge), CoriolisTerm, sshSubcycleCur(cell2), sshSubcycleCur(cell1), dcEdge(iEdge), barotropicForcing(iEdge), edgeMask(iEdge)
   end do
   !$omp end do
 

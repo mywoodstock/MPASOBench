@@ -10,7 +10,7 @@
 #include Make.inc.intel
 include make.inc
 
-VTUNE_AMPLIFIER_XE_2016_DIR=/opt/intel/vtune/2016u3.external.vtknl/vtune_amplifier_xe
+#VTUNE_AMPLIFIER_XE_2016_DIR=/opt/intel/vtune/2016u3.external.vtknl/vtune_amplifier_xe
 
 CFLAGS = -g -I $(VTUNE_AMPLIFIER_XE_2016_DIR)/include
  
