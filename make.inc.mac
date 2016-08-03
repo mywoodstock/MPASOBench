@@ -1,0 +1,12 @@
+# compilers
+FC = mpifort-mpich-mp
+
+# flags
+FFLAGS = -g -O3 -fopenmp #-opt-report=5 #array64byte
+LDFLAGS = -g -O3
+LDLIBS = -fopenmp
+
+SIMDWIDTH = 2
+FFLAGS += -DSIMDWIDTH=$(SIMDWIDTH)
+
+BIN = kernels
