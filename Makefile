@@ -45,19 +45,19 @@ kernels.2.o : kernels.F90 module_itt_sde.o api_itt_sde.o
 	$(FC) $(FFLAGS) -D__KERNEL_2 -c $< -o $@ ${CFLAGS}
                                               
 api_itt_sde.o : api_itt_sde.c 
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $^ -o $@
 
 module_itt_sde.o : api_itt_sde.o
 	$(FC) $(FFLAGS) -c module_itt_sde.f90 -o $@ ${LDFLAGS}
 
 $(BIN).vtune.% : module_itt_sde.o api_itt_sde.o kernels.%.o
-	$(FC) $(FFLAGS) -o $@ $< api_itt_sde.o ${LDFLAGS}
+	$(FC) $(FFLAGS) -o $@ $^ api_itt_sde.o ${LDFLAGS}
 
 $(BIN).ipm.% : kernels.%.o
-	$(FC) $(FFLAGS) -o $@ $< $(IPM)
+	$(FC) $(FFLAGS) -o $@ $^ $(IPM)
 
-$(BIN).% : kernels.%.o
-	$(FC) $(FFLAGS) -o $@ $< ${LDFLAGS}
+$(BIN).% : kernels.%.o module_itt_sde.o api_itt_sde.o
+	$(FC) $(FFLAGS) -o $@ $^ ${LDFLAGS}
 
 
 

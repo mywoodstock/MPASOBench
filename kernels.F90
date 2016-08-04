@@ -55,7 +55,7 @@ end module vars
 
 
 program kernels
-#if defined(USE_VTUNE)
+#if defined(USE_SDE)
   use itt_sde_fortran
 #endif
   use vars
@@ -131,7 +131,7 @@ print *, "starting to read initial conditions"
 
 
   call MPI_Pcontrol(1, "Measure BW"//char(0))
-#if defined(USE_VTUNE)
+#if defined(USE_SDE)
   print*, "Using Vtune resume/pause API"
   call start_collection()
 #endif
@@ -151,7 +151,7 @@ print *, "starting to read initial conditions"
   end do ! it1
 
   call MPI_Pcontrol(-1, "Measure BW"//char(0))
-#if defined(USE_VTUNE)
+#if defined(USE_SDE)
   call stop_collection()
 #endif
 
