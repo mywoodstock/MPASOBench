@@ -6,8 +6,6 @@ void fortran_sde_start()
 {
 #ifdef USE_SDE
    __SSC_MARK(0x111);
-#else
-#warning Not using SDE markers
 #endif
 }  
 

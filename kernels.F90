@@ -1,13 +1,15 @@
 #define DAT_FNAME ("mesh240_orig.txt")
 
+#define CACHE_SIZE_L2 (1 * 1024 * 1024)
+
 Module vars
 Implicit None
 save
 
   ! *** parameters to control iteration counts ***
   integer, parameter :: nouter  = 20, & ! number of times to loop through all kernels (running each ninner times)
-                        ninner  = 100, & ! number of times to repeat each kernel successively
-                        nkernel = 2  ! number of kernels run below (used in storing times, solutions)
+                        ninner  = 1, & ! number of times to repeat each kernel successively
+                        nkernel = 1  ! number of kernels run below (used in storing times, solutions)
   ! --
   ! profiling variables
   integer :: it1, it2
@@ -31,6 +33,10 @@ save
   integer :: i, j, k, mb, d, num_threads=1, kernel=-1, s
   integer :: numtasks, rank, ierr
   double precision :: norm2
+
+  ! miscellaneous
+  double precision, allocatable, dimension(:) :: cache_buffer
+  integer :: buffer_size = CACHE_SIZE_L2 * 64
 
   character(len=32) :: args
   integer :: argcount
@@ -63,7 +69,13 @@ program kernels
   implicit none
   include 'mpif.h'
   include 'omp_lib.h'
-  
+
+  print *, "Cache cleaning buffer size = ", buffer_size * 8 / 1024 / 1024, "MB"
+  allocate(cache_buffer(buffer_size))
+  call random_seed()
+  do i = 1, buffer_size
+    call random_number(cache_buffer(i))
+  enddo
   
   ! use bulk vector mapping instead of inlined one
   ! --
@@ -74,18 +86,10 @@ program kernels
   !initialize variables
 !  call init_vars()
 
-!  max_nEdgesOnEdge=16
-!  nEdges=32
-!  nCells=64
-!  open(unit=5, file=DAT_FNAME, form='unformatted', action='write')
-!  write(5) max_nEdgesOnEdge, nEdges, nCells
-!  close(5)
-
-
   ! load the data
   ! here, the data are packed such that each SIMD height x ndiag width panel of
   ! the matrix element and indexing data has been stored contiguously
-print *, "starting to read initial conditions"
+  print *, "starting to read initial conditions"
   open(unit=10, file=DAT_FNAME, action='read')
   read(10, '(i10)') max_nEdgesOnEdge
   read(10, '(i10)') nEdges
@@ -117,8 +121,10 @@ print *, "starting to read initial conditions"
   read(10, '(e23.16)') barotropicForcing
   close(10)
 
+  print *, 'Done reading data'
+
   do i = 1, nEdges
-    edgeMask = 1
+    edgeMask(i) = 1
   enddo
 
 
@@ -129,78 +135,87 @@ print *, "starting to read initial conditions"
 
   ! ... run timing tests ...
 
+  !call MPI_Pcontrol(1, "Measure BW"//char(0))
 
-  call MPI_Pcontrol(1, "Measure BW"//char(0))
-#if defined(USE_SDE)
-  print*, "Using Vtune resume/pause API"
-  call start_collection()
-#endif
-
+  print *, "starting iterations..."
   do it1 = 1, nouter
+    call clear_cache()
     wtb = MPI_Wtime()
-
     do it2 = 1, ninner
-    
-    !$omp parallel
+#if defined(USE_SDE) || defined(USE_VTUNE)
+      call start_collection()
+#endif
+      !$omp parallel
       call run_kernel()
-    !$omp end parallel
-    
+      !$omp end parallel
+#if defined(USE_SDE) || defined(USE_VTUNE)
+      call stop_collection()
+#endif
     end do ! it2
     wt(it1) = MPI_Wtime() - wtb
-    print*, "Iter/ time", it1, wt(it1)
+    print *, "Iteration", it1, "time: ", wt(it1)
   end do ! it1
 
-  call MPI_Pcontrol(-1, "Measure BW"//char(0))
-#if defined(USE_SDE)
-  call stop_collection()
-#endif
+  !call MPI_Pcontrol(-1, "Measure BW"//char(0))
 
   wtk = sum(wt)
-  mean = wtk/nouter/ninner
+  mean = wtk / nouter / ninner
   call sort(wt, size(wt))
-  median = wt(nouter/2)/ninner
-  std = SQRT (sum(wt(1:nouter)**2)/nouter - mean**2)/ninner
-  write(*,*) 'Time/test: total                 std               med'
-  write(*,*) sum(wt), std, median
-  write(*,*) 'Time/test: min                   max               avg'
-  write(*,*) minval(wt)/ninner, maxval(wt)/ninner, mean
+  median = wt(nouter / 2) / ninner
+  std = SQRT(sum((wt(1:nouter) / ninner - mean) ** 2) / nouter)
+  write(*,*) 'Time: total = ', sum(wt), ' median = ', median
+  write(*,*) '        min = ', minval(wt) / ninner, '    max = ', maxval(wt) / ninner
+  write(*,*) '       mean = ', mean, ' stddev = ', std
 
   !$omp parallel
-    num_threads = omp_get_num_threads()
-  !$omp end parallel
+  num_threads = omp_get_num_threads()
+  !$omp do schedule(runtime) reduction(+:norm2)
   do i = 1, nEdges
-    norm2 = normalBarotropicVelocitySubcycleNew(i)*normalBarotropicVelocitySubcycleNew(i)
+    norm2 = norm2 + normalBarotropicVelocitySubcycleNew(i) * normalBarotropicVelocitySubcycleNew(i)
   enddo
-  print *, 'Kernel:', kernel, "Omp th:", num_threads
-  print *, 'Norm:', norm2
+  !$omp end do
+  !$omp end parallel
+  print *, "Number of OpenMP threads:", num_threads
+  print *, "Norm value:", sqrt(norm2)
 
   call MPI_Finalize(ierr)
 end program kernels
+
+
+subroutine clear_cache()
+  use vars
+  implicit none
+  double precision :: rsum
+  do i = 1, buffer_size
+    call random_number(cache_buffer(i))
+  enddo
+  rsum = 0.0
+  !$omp do schedule(runtime) reduction(+:rsum)
+  do i = 1, buffer_size
+    rsum = rsum + cache_buffer(i)
+  enddo
+  !$omp end do
+  rsum = rsum / buffer_size
+  print *, "Mean random number: ", rsum
+end subroutine clear_cache
 
 
 subroutine run_kernel()
   use vars
   implicit none
 
-  ! ---------------- original code
 #ifdef __KERNEL_1
-  kernel=1
+  kernel = 1
   call edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdge, &
-                   edgesOnEdge, fEdge, normalBarotropicVelocitySubcycleCur, &
-                   weightsOnEdge, sshSubcycleCur, dcEdge, barotropicForcing, edgeMask, &
-                   normalBarotropicVelocitySubcycleNew)
-#endif
-
-  ! ---------------- original code
-#ifdef __KERNEL_2
-  kernel=2
+                  edgesOnEdge, fEdge, normalBarotropicVelocitySubcycleCur, &
+                  weightsOnEdge, sshSubcycleCur, dcEdge, barotropicForcing, edgeMask, &
+                  normalBarotropicVelocitySubcycleNew)
 #endif
 
 end subroutine run_kernel
 
 
-! kernel variant 1
-! ----------------
+! kernel 1
 subroutine edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdge, &
                    edgesOnEdge, fEdge, normalBarotropicVelocitySubcycleCur, &
                    weightsOnEdge, sshSubcycleCur, dcEdge, barotropicForcing, edgeMask, &
@@ -223,12 +238,12 @@ subroutine edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdg
 
   ! local
   double precision :: CoriolisTerm
-  integer iEdge, i, eoe, cell1, cell2
-  double precision const1, const2
-  const1 =360.0
-  const2=9.8
+  integer :: iEdge, i, eoe, cell1, cell2
+  double precision :: const1, const2
+  const1 = 360.0
+  const2 = 9.86
 
-  !$omp do schedule(runtime) private(cell1, cell2,CoriolisTerm, i, eoe)
+  !$omp do schedule(runtime) private(cell1, cell2, CoriolisTerm, i, eoe)
   do iEdge = 1, nEdges
 
     cell1 = cellsOnEdge(1,iEdge)
@@ -239,15 +254,15 @@ subroutine edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdg
 !    !dir$ VECTOR ALIGNED
     do i = 1, nEdgesOnEdge(iEdge)
        eoe = edgesOnEdge(i,iEdge)
-       CoriolisTerm = CoriolisTerm + weightsOnEdge(i,iEdge)&
-                      *normalBarotropicVelocitySubcycleCur(eoe) * fEdge(eoe)
+       CoriolisTerm = CoriolisTerm + weightsOnEdge(i,iEdge) &
+                      * normalBarotropicVelocitySubcycleCur(eoe) * fEdge(eoe)
     end do
 
     normalBarotropicVelocitySubcycleNew(iEdge) &
       = (normalBarotropicVelocitySubcycleCur(iEdge) &
-      + const1 * (CoriolisTerm - const2 &
-      * (sshSubcycleCur(cell2) - sshSubcycleCur(cell1) ) &
-      / dcEdge(iEdge) + barotropicForcing(iEdge))) * edgeMask(iEdge)
+        + const1 * (CoriolisTerm - const2 &
+        * (sshSubcycleCur(cell2) - sshSubcycleCur(cell1) ) &
+        / dcEdge(iEdge) + barotropicForcing(iEdge))) * edgeMask(iEdge)
 
   end do
   !$omp end do
