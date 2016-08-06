@@ -61,7 +61,7 @@ end module vars
 
 
 program kernels
-#if defined(USE_SDE)
+#if defined(USE_SDE) || defined(USE_VTUNE)
   use itt_sde_fortran
 #endif
   use vars
@@ -126,7 +126,6 @@ program kernels
   do i = 1, nEdges
     edgeMask(i) = 1
   enddo
-
 
   ! run once before timing and before initialization to get OMP initialized and for first touch policy
   !$omp parallel

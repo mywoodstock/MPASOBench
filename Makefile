@@ -16,8 +16,8 @@ OBJ = kernels.o
 ###
 ifeq ($(VTUNE),1)
 FFLAGS += -DUSE_VTUNE
+CFLAGS += -DUSE_VTUNE -I $(VTUNE_AMPLIFIER_XE_2016_DIR)/include
 LDFLAGS += $(VTUNE_AMPLIFIER_XE_2016_DIR)/lib64/libittnotify.a
-CFLAGS += -I $(VTUNE_AMPLIFIER_XE_2016_DIR)/include
 endif
 
 ifeq ($(SDE),1)
