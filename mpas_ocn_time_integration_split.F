@@ -764,9 +764,6 @@ module ocn_time_integration_split
            + max_nEdgesOnEdge*nEdges*8 + nEdges*8 &
            + nEdges*8 + nCells*8     + nEdges*8 + nEdges*8         +4
 
-print*, dcEdge 
-stop 1
-
   open(unit = 10, file=fname, status='replace', action='write', recl=recsize)
 
   write(10, '(i10)') max_nEdgesOnEdge
