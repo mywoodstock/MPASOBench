@@ -3,7 +3,7 @@ CC= mpiicc
 FC = mpiifort
 
 # flags
-FFLAGS = -DKNL -g -O3 -align -qopenmp -xMIC-AVX512 #-opt-report=5 #array64byte
+FFLAGS = -DKNL -g -convert big_endian -FR -qopenmp #-xMIC-AVX512 #-opt-report=5 #array64byte
 LDFLAGS =
 LDLIBS = -qopenmp
 

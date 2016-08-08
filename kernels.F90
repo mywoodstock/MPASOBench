@@ -1,4 +1,5 @@
-#define DAT_FNAME ("mesh240_orig.txt")
+!#define DAT_FNAME ("mesh240_orig.txt")
+#define DAT_FNAME ("state_arrays_new.bin")
 
 #define CACHE_SIZE_L2 (1 * 1024 * 1024)
 
@@ -58,8 +59,6 @@ end subroutine init_vars
 end module vars
 
 
-
-
 program kernels
 #if defined(USE_SDE) || defined(USE_VTUNE)
   use itt_sde_fortran
@@ -84,20 +83,17 @@ program kernels
   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
   
   !initialize variables
-!  call init_vars()
+  !call init_vars()
 
   ! load the data
-  ! here, the data are packed such that each SIMD height x ndiag width panel of
-  ! the matrix element and indexing data has been stored contiguously
   print *, "starting to read initial conditions"
+#ifdef USE_FORMATTED
   open(unit=10, file=DAT_FNAME, action='read')
   read(10, '(i10)') max_nEdgesOnEdge
   read(10, '(i10)') nEdges
   read(10, '(i10)') nCells
-
   print *, max_nEdgesOnEdge, nEdges, nCells
-
-  allocate(cellsOnEdge(2,nEdges))
+  allocate(cellsOnEdge(2, nEdges))
   allocate(nEdgesOnEdge(nEdges))
   allocate(edgesOnEdge(max_nEdgesOnEdge, nEdges))
   allocate(weightsOnEdge(max_nEdgesOnEdge, nEdges))
@@ -108,8 +104,6 @@ program kernels
   allocate(barotropicForcing(nEdges))
   allocate(edgeMask(nEdges))
   allocate(normalBarotropicVelocitySubcycleNew(nEdges))
-
-
   read(10, '(i10)' ) cellsOnEdge
   read(10, '(i10)' ) edgesOnEdge
   read(10, '(i10)' ) nEdgesOnEdge
@@ -120,7 +114,32 @@ program kernels
   read(10, '(e23.16)') dcEdge
   read(10, '(e23.16)') barotropicForcing
   close(10)
-
+#else
+  open(unit=16, file=DAT_FNAME, action='read', form='unformatted')
+  read (16), nCells, nEdges, max_nEdgesOnEdge
+  print *, nCells, nEdges, max_nEdgesOnEdge
+  allocate(cellsOnEdge(2, nEdges))
+  allocate(nEdgesOnEdge(nEdges))
+  allocate(edgesOnEdge(max_nEdgesOnEdge, nEdges))
+  allocate(weightsOnEdge(max_nEdgesOnEdge, nEdges))
+  allocate(normalBarotropicVelocitySubcycleCur(nEdges))
+  allocate(fEdge(nEdges))
+  allocate(sshSubcycleCur(nCells))
+  allocate(dcEdge(nEdges))
+  allocate(barotropicForcing(nEdges))
+  allocate(edgeMask(nEdges))
+  allocate(normalBarotropicVelocitySubcycleNew(nEdges))
+  read (16), cellsOnEdge
+  read (16), edgesOnEdge
+  read (16), nEdgesOnEdge
+  read (16), weightsOnEdge
+  read (16), normalBarotropicVelocitySubcycleCur
+  read (16), fEdge
+  read (16), sshSubcycleCur
+  read (16), dcEdge
+  read (16), barotropicForcing
+  close(16)
+#endif
   print *, 'Done reading data'
 
   do i = 1, nEdges

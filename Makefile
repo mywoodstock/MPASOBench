@@ -10,6 +10,7 @@
 include build/make.inc
 
 CFLAGS = -O3 -g -I.
+FFLAGS += -g
  
 OBJ = kernels.o
 
@@ -59,6 +60,11 @@ $(BIN).ipm.% : kernels.%.o
 $(BIN).% : kernels.%.o module_itt_sde.o api_itt_sde.o
 	$(FC) $(FFLAGS) -o $@ $^ ${LDFLAGS}
 
+temp.o: temp.F90
+	$(FC) $(FFLAGS) -o $@ -c $^
+
+temp: temp.o
+	$(FC) $(FFLAGS) -o $@ $< $(LDFLAGS)
 
 
 .PHONY : clean

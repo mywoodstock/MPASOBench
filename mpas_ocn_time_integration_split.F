@@ -743,17 +743,9 @@ module ocn_time_integration_split
 
                      call mpas_pool_get_array(diagnosticsPool, 'barotropicForcing', barotropicForcing)
 
-#ifdef CAPTURE_STATE
-!$omp master
+#ifdef CAPTURE_STATE_OLD
+  !$omp master
   max_nEdgesOnEdge = maxval(nEdgesOnEdge)
-
-!cellsOnEdge(2,nEdges)
-!nEdgesOnEdge(nEdges)
-!edgesOnEdge(max_nEdgesOnEdge, nEdges)
-!weightsOnEdge(max_nEdgesOnEdge, nEdges)
-!normalBarotropicVelocitySubcycleCur(nEdges)
-!fEdge(nEdges)
-
   fname = 'state_arrays.bin'
   print *, "Writing the arrays to the file", fname
 
@@ -782,11 +774,32 @@ module ocn_time_integration_split
 
   close(10)
   print *, "Completed writing the arrays to the file", fname
-!$omp end master
+  !$omp end master
+  !$omp barrier
+  stop 1
+#endif
 
-!$omp barrier
-
-stop 1
+#ifdef CAPTURE_STATE
+  !$omp master
+  max_nEdgesOnEdge = maxval(nEdgesOnEdge)
+  fname = 'state_arrays_new.bin'
+  print *, "Writing the arrays to the file", fname
+  open(unit = 16, file = fname, status = 'replace', action='write', form = 'unformatted')
+  write (16), nCells, nEdges, max_nEdgesOnEdge
+  write (16), cellsOnEdge
+  write (16), edgesOnEdge
+  write (16), nEdgesOnEdge
+  write (16), weightsOnEdge
+  write (16), normalBarotropicVelocitySubcycleCur
+  write (16), fEdge
+  write (16), sshSubcycleCur
+  write (16), dcEdge
+  write (16), barotropicForcing
+  close (16)
+  print *, "Completed writing the arrays to the file", fname
+  !$omp end master
+  !$omp barrier
+  stop 1
 #endif
 
                      call mpas_timer_start('subcycle_subloop', .false.)
