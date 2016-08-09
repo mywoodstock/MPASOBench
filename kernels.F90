@@ -8,7 +8,7 @@ Implicit None
 save
 
   ! *** parameters to control iteration counts ***
-  integer, parameter :: nouter  = 20, & ! number of times to loop through all kernels (running each ninner times)
+  integer, parameter :: nouter  = 10, & ! number of times to loop through all kernels (running each ninner times)
                         ninner  = 1, & ! number of times to repeat each kernel successively
                         nkernel = 1  ! number of kernels run below (used in storing times, solutions)
   ! --
@@ -16,7 +16,7 @@ save
   integer :: it1, it2
   integer :: m, mz, n, ndiag, m_zz
   double precision, dimension(nouter) :: wt
-  double precision :: wtb, wtk, std, mean, median
+  double precision :: wtb, std, mean, median
 
   ! problem variables
   integer :: max_nEdgesOnEdge, nEdges, nCells
@@ -33,28 +33,17 @@ save
   ! --
   integer :: i, j, k, mb, d, num_threads=1, kernel=-1, s
   integer :: numtasks, rank, ierr
-  double precision :: norm2
+  double precision :: norm_sq
 
   ! miscellaneous
   double precision, allocatable, dimension(:) :: cache_buffer
   integer :: buffer_size = CACHE_SIZE_L2 * 64
+  character(len=120) :: fname
 
-  character(len=32) :: args
+  character(len=120) :: args
   integer :: argcount
 
-
 contains 
-
-subroutine init_vars()
-!  argcount = command_argument_count()
-!  if (argcount.ge.2) then
-!    call get_command_argument(2, args)
-!    read(args,*)nRHS
-!    write(*,*)'Using RHS block size: ',nRHS
-!  else
-!    write(*,*)'Using default RHS block size: ',nRHS
-!  endif
-end subroutine init_vars
 
 end module vars
 
@@ -70,11 +59,18 @@ program kernels
   include 'omp_lib.h'
 
   print *, "Cache cleaning buffer size = ", buffer_size * 8 / 1024 / 1024, "MB"
-  allocate(cache_buffer(buffer_size))
   call random_seed()
-  do i = 1, buffer_size
-    call random_number(cache_buffer(i))
-  enddo
+
+  argcount = command_argument_count()
+  if(argcount.ge.1) then
+    call get_command_argument(1, args)
+    print *, args
+    fname = args
+  else
+    print *, 'no arguments. using default'
+    args = 'inputs/state_arrays_new.bin'
+    fname = args
+  endif
   
   ! use bulk vector mapping instead of inlined one
   ! --
@@ -86,9 +82,9 @@ program kernels
   !call init_vars()
 
   ! load the data
-  print *, "starting to read initial conditions"
+  print *, "Reading data from ", fname
 #ifdef USE_FORMATTED
-  open(unit=10, file=DAT_FNAME, action='read')
+  open(unit=10, file=fname, action='read')
   read(10, '(i10)') max_nEdgesOnEdge
   read(10, '(i10)') nEdges
   read(10, '(i10)') nCells
@@ -115,7 +111,7 @@ program kernels
   read(10, '(e23.16)') barotropicForcing
   close(10)
 #else
-  open(unit=16, file=DAT_FNAME, action='read', form='unformatted')
+  open(unit=16, file=fname, action='read', form='unformatted')
   read (16), nCells, nEdges, max_nEdgesOnEdge
   print *, nCells, nEdges, max_nEdgesOnEdge
   allocate(cellsOnEdge(2, nEdges))
@@ -148,14 +144,16 @@ program kernels
 
   ! run once before timing and before initialization to get OMP initialized and for first touch policy
   !$omp parallel
-  call run_kernel()
+  !call run_kernel()
   !$omp end parallel
-
-  ! ... run timing tests ...
 
   !call MPI_Pcontrol(1, "Measure BW"//char(0))
 
-  print *, "starting iterations..."
+  !$omp parallel
+  num_threads = omp_get_num_threads()
+  !$omp end parallel
+  print *, "starting iterations... [", num_threads, " threads]"
+
   do it1 = 1, nouter
     call clear_cache()
     wtb = MPI_Wtime()
@@ -176,25 +174,36 @@ program kernels
 
   !call MPI_Pcontrol(-1, "Measure BW"//char(0))
 
-  wtk = sum(wt)
-  mean = wtk / nouter / ninner
+  mean = sum(wt) / nouter / ninner
+  std = sqrt(sum((wt(1:nouter) / ninner - mean) ** 2) / nouter)
   call sort(wt, size(wt))
   median = wt(nouter / 2) / ninner
-  std = SQRT(sum((wt(1:nouter) / ninner - mean) ** 2) / nouter)
   write(*,*) 'Time: total = ', sum(wt), ' median = ', median
   write(*,*) '        min = ', minval(wt) / ninner, '    max = ', maxval(wt) / ninner
   write(*,*) '       mean = ', mean, ' stddev = ', std
 
   !$omp parallel
   num_threads = omp_get_num_threads()
-  !$omp do schedule(runtime) reduction(+:norm2)
+  !$omp do schedule(runtime) reduction(+:norm_sq)
   do i = 1, nEdges
-    norm2 = norm2 + normalBarotropicVelocitySubcycleNew(i) * normalBarotropicVelocitySubcycleNew(i)
+    norm_sq = norm_sq + normalBarotropicVelocitySubcycleNew(i) * normalBarotropicVelocitySubcycleNew(i)
   enddo
   !$omp end do
   !$omp end parallel
   print *, "Number of OpenMP threads:", num_threads
-  print *, "Norm value:", sqrt(norm2)
+  print *, "Norm value:", sqrt(norm_sq)
+
+  deallocate(cellsOnEdge)
+  deallocate(nEdgesOnEdge)
+  deallocate(edgesOnEdge)
+  deallocate(weightsOnEdge)
+  deallocate(normalBarotropicVelocitySubcycleCur)
+  deallocate(fEdge)
+  deallocate(sshSubcycleCur)
+  deallocate(dcEdge)
+  deallocate(barotropicForcing)
+  deallocate(edgeMask)
+  deallocate(normalBarotropicVelocitySubcycleNew)
 
   call MPI_Finalize(ierr)
 end program kernels
@@ -204,17 +213,27 @@ subroutine clear_cache()
   use vars
   implicit none
   double precision :: rsum
+  allocate(cache_buffer(buffer_size))
+  rsum = 0.0
+  !print *, "Attempting to clear cache with dummy buffer of size", buffer_size
+
+  !$omp parallel do schedule(runtime) shared(cache_buffer)
+  do i = 1, buffer_size
+    cache_buffer(i) = -1.0
+  enddo
+  !$omp end parallel do
   do i = 1, buffer_size
     call random_number(cache_buffer(i))
   enddo
-  rsum = 0.0
-  !$omp do schedule(runtime) reduction(+:rsum)
+  !$omp parallel do schedule(runtime) reduction(+:rsum)
   do i = 1, buffer_size
     rsum = rsum + cache_buffer(i)
   enddo
-  !$omp end do
+  !$omp end parallel do
+
   rsum = rsum / buffer_size
   print *, "Mean random number: ", rsum
+  deallocate(cache_buffer)
 end subroutine clear_cache
 
 
@@ -269,7 +288,8 @@ subroutine edge_bench(nEdges, nCells, max_nEdgesOnEdge, nEdgesOnEdge, cellsOnEdg
 
     ! Compute the barotropic Coriolis term, -f*uPerp
     CoriolisTerm = 0.0
-!    !dir$ VECTOR ALIGNED
+    !dir$ VECTOR ALIGNED
+    !dir$ loop count max(10)
     do i = 1, nEdgesOnEdge(iEdge)
        eoe = edgesOnEdge(i,iEdge)
        CoriolisTerm = CoriolisTerm + weightsOnEdge(i,iEdge) &
